@@ -15,7 +15,8 @@ enum State {
   SETTINGS_CONFIRM,
   MOVE_HISTORY,
   GAME_END,
-  PLAY_CONFIG
+  PLAY_CONFIG,
+  TUTORIAL
 };
 
 void transitionTo(State next);
@@ -28,6 +29,7 @@ void handleSettingsConfirmKey(char key);
 void handleMoveHistoryKey(char key);
 void handleGameEndKey(char key);
 void handlePlayConfigKey(char key);
+void handleTutorialKey(char key);
 void handlePromotionKey(char key);
 void handleSerial();
 void handleTimer();
@@ -37,6 +39,7 @@ void drawSettings();
 void drawMoveHistory();
 void drawGameEnd();
 void drawPlayConfig();
+void drawTutorial();
 void drawTimerRow();
 void setupKeypad();
 char scanKeypad();
@@ -267,7 +270,7 @@ const unsigned long ILLEGAL_DURATION = 2000;
 // ============================================================
 // SETTINGS
 // ============================================================
-const int SETTINGS_COUNT = 4;
+const int SETTINGS_COUNT = 5;
 int settingsScroll  = 0;
 
 // ============================================================
@@ -332,6 +335,7 @@ String stateLabel(State s) {
     case MOVE_HISTORY:     return "MOVE_HISTORY";
     case GAME_END:         return "GAME_END";
     case PLAY_CONFIG:      return "PLAY_CONFIG";
+    case TUTORIAL:         return "TUTORIAL";
     default:               return "UNKNOWN";
   }
 }
@@ -360,7 +364,8 @@ void setup() {
 
   applyTimerSetting();
   applyIncrementSetting();
-  transitionTo(MAIN_MENU);
+  tutorialReturnState = MAIN_MENU;
+  transitionTo(TUTORIAL);
 }
 
 // ============================================================
@@ -385,7 +390,9 @@ void loop() {
           String r0 = "Last: " + lastMoveStr + "                ";
           lcdWrite(0, 0, r0.substring(0, 16));
         } else {
-          lcdWrite(0, 0, "Move:           ");
+          String row = "Move:           ";
+          if (hashToggled) row.setCharAt(15, '^');
+          lcdWrite(0, 0, row);
         }
       }
       break;
@@ -425,6 +432,7 @@ void handleKey(char key) {
     case GAME_END:           handleGameEndKey(key);        break;
     case PLAY_CONFIG:        handlePlayConfigKey(key);     break;
     case PROMOTION:          handlePromotionKey(key);      break;
+    case TUTORIAL:           handleTutorialKey(key);       break;
     default: break;
   }
 }
@@ -453,7 +461,7 @@ void drawMainMenu() {
     case 0: lcdWrite(0, 0, "> New Game      "); break;
     default: break;
   }
-  lcdWrite(0, 1, "C:Select  B:Next");
+  lcdWrite(0, 1, "C:Select        ");
 }
 
 // ============================================================
@@ -464,19 +472,14 @@ void handleInputKey(char key) {
 
   if (key == '#') {
     hashToggled = !hashToggled;
-    lcdWrite(15, 0, hashToggled ? "^" : " ");
-    return;
-  }
-
-  if (key == '9') {
+    // Fall through to redraw
+  } else if (key == '9') {
     inputBuffer = "";
     hashToggled = false;
     // Clear typing row and restore timer
     drawTimerRow();
     return;
-  }
-
-  if (key == '0') {
+  } else if (key == '0') {
     // Allow submitting if length >= 2 (e.g. "e4", "g5", "e2e4")
     if (inputBuffer.length() >= 2) {
       Serial.print("MOVE:");
@@ -486,22 +489,22 @@ void handleInputKey(char key) {
       transitionTo(THINKING);
     }
     return;
+  } else {
+    // Max length 5 (e.g. "a7a8q")
+    if (inputBuffer.length() >= 5) return;
+
+    char mapped = mapKey(key);
+    if (mapped != 0) {
+      inputBuffer += mapped;
+    }
   }
 
-  // Max length 5 (e.g. "a7a8q")
-  if (inputBuffer.length() >= 5) return;
-
-  char mapped = mapKey(key);
-  if (mapped != 0) {
-    inputBuffer += mapped;
-    // Show typing on Row 0 (Top), keeping Timer on Row 1
-    String row = "Move: ";
-    row += inputBuffer;
-    while (row.length() < 15) row += " ";
-    row += (hashToggled ? "^" : " ");   // position 15
-    
-    lcdWrite(0, 0, row.substring(0, 16));
-  }
+  // Unified display update
+  String row = "Move: ";
+  row += inputBuffer;
+  while (row.length() < 15) row += " ";
+  row += (hashToggled ? "^" : " ");   // position 15
+  lcdWrite(0, 0, row.substring(0, 16));
 }
 
 char mapKey(char k) {
@@ -556,6 +559,10 @@ void handleSettingsKey(char key) {
         drawSettings();
         break;
       case 3:
+        tutorialReturnState = SETTINGS;
+        transitionTo(TUTORIAL);
+        break;
+      case 4:
         transitionTo(SETTINGS_CONFIRM);
         break;
     }
@@ -576,7 +583,8 @@ String settingsRowText(int index) {
     case 0: return "View History";
     case 1: return "Hint/Best Move";
     case 2: return "Diff:" + String(difficulty);
-    case 3: return "Resign";
+    case 3: return "Controls Info";
+    case 4: return "Resign";
     default: return "";
   }
 }
@@ -679,6 +687,8 @@ void handlePlayConfigKey(char key) {
         return;
     }
     drawPlayConfig();
+  } else if (key == 'D') {
+    transitionTo(MAIN_MENU);
   }
 }
 
@@ -686,7 +696,11 @@ void drawPlayConfig() {
   String row = ">" + configRowText(configScroll);
   while (row.length() < 16) row += " ";
   lcdWrite(0, 0, row.substring(0, 16));
-  lcdWrite(0, 1, "C:Change  B:Next");
+  if (configScroll == 4) {
+    lcdWrite(0, 1, "C:Start  D:Back ");
+  } else {
+    lcdWrite(0, 1, "A/B:Nav C:Change");
+  }
 }
 
 String configRowText(int index) {
@@ -731,6 +745,36 @@ void startGame() {
 }
 
 // ============================================================
+// TUTORIAL
+// ============================================================
+void handleTutorialKey(char key) {
+  if (key == 'C') {
+    tutorialPage++;
+    if (tutorialPage > 4) {
+      transitionTo(tutorialReturnState);
+    } else {
+      drawTutorial();
+    }
+  } else if (key == 'D') {
+    transitionTo(tutorialReturnState);
+  }
+}
+
+void drawTutorial() {
+  String r0, r1;
+  switch(tutorialPage) {
+    case 0: r0="Controls Guide  "; r1="C:Next  D:Skip  "; break;
+    case 1: r0="Nav: A=Up B=Dn  "; r1="C=Ok D=Back     "; break;
+    case 2: r0="Input: A-D=a-d  "; r1="#=Toggle e-h    "; break;
+    case 3: r0="Input: 0=Submit "; r1="9=Clear *=Menu  "; break;
+    case 4: r0="Tutorial Done   "; r1="C:Continue      "; break;
+    default: r0="                "; r1="                "; break;
+  }
+  lcdWrite(0, 0, r0);
+  lcdWrite(0, 1, r1);
+}
+
+// ============================================================
 // PROMOTION
 // ============================================================
 void handlePromotionKey(char key) {
@@ -766,6 +810,7 @@ void handleSerial() {
 void processSerialMessage(String msg) {
   if (msg.startsWith("EVAL:")) {
     // EVAL received = Player move was valid
+    addToHistory(lastMoveStr);
     evalLabel     = msg.substring(5);
     evalAnimIndex = getEvalAnimIndex(evalLabel);
     evalFrame     = 0;
@@ -779,6 +824,7 @@ void processSerialMessage(String msg) {
   } else if (msg.startsWith("BEST:")) {
     String bestMove = msg.substring(5);
     // Keep original case for SAN (e.g. Nf3)
+    addToHistory(bestMove);
     lastMoveStr      = bestMove;
     timerPaused      = true;
     moveDisplayStart = millis();
@@ -815,7 +861,6 @@ void processSerialMessage(String msg) {
 
   } else if (msg.startsWith("HINT:")) {
     String hintMove = msg.substring(5);
-    hintMove.toUpperCase();
     String row = "Hint: " + hintMove;
     while (row.length() < 16) row += " ";
     lcdWrite(0, 0, row.substring(0, 16));
@@ -1132,6 +1177,11 @@ void transitionTo(State next) {
 
     case PLAY_CONFIG:
       drawPlayConfig();
+      break;
+
+    case TUTORIAL:
+      tutorialPage = 0;
+      drawTutorial();
       break;
   }
 

@@ -15,7 +15,7 @@ import serial
 import chess
 import chess.engine
 
-PORT     = "/dev/ttyACM0"
+PORT     = "/dev/ttyACM1"
 BAUD     = 9600
 SF_PATH  = "/usr/bin/stockfish"
 
