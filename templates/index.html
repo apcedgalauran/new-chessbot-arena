@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ChessBot Arena</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* LCD simulator */
+    .lcd-display {
+      font-family: 'Courier New', monospace;
+      background: #0a2a0a;
+      color: #33ff33;
+      border: 3px solid #333;
+      border-radius: 8px;
+      padding: 12px 16px;
+      letter-spacing: 2px;
+      font-size: 18px;
+      line-height: 1.6;
+      text-shadow: 0 0 8px #33ff33aa;
+      box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
+    }
+
+    /* Chess board */
+    .square-light { background-color: #f0d9b5; }
+    .square-dark  { background-color: #b58863; }
+    .square-highlight-light { background-color: #f7ec5d; }
+    .square-highlight-dark  { background-color: #dac34b; }
+
+    .piece {
+      font-size: 2.2rem;
+      line-height: 1;
+      cursor: default;
+      user-select: none;
+    }
+
+    @media (min-width: 768px) {
+      .piece { font-size: 2.8rem; }
+    }
+
+    /* Eval bar */
+    .eval-bar-container {
+      width: 32px;
+      height: 100%;
+      background: #333;
+      border-radius: 4px;
+      overflow: hidden;
+      position: relative;
+    }
+    .eval-bar-white {
+      position: absolute;
+      bottom: 0;
+      width: 100%;
+      background: #f0f0f0;
+      transition: height 0.5s ease;
+    }
+    .eval-bar-black {
+      position: absolute;
+      top: 0;
+      width: 100%;
+      background: #333;
+      transition: height 0.5s ease;
+    }
+
+    /* Quality badges */
+    .badge-BRILLIANT  { background: #f5a623; color: #000; }
+    .badge-GOOD       { background: #22c55e; color: #fff; }
+    .badge-INAC       { background: #eab308; color: #000; }
+    .badge-MISTAKE    { background: #f97316; color: #fff; }
+    .badge-BLUNDER    { background: #ef4444; color: #fff; }
+
+    /* Scrollbar for history */
+    .history-scroll::-webkit-scrollbar { width: 6px; }
+    .history-scroll::-webkit-scrollbar-track { background: #1e293b; }
+    .history-scroll::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+
+    /* Button pulse for thinking */
+    @keyframes pulse-dot {
+      0%, 80%, 100% { opacity: 0; }
+      40% { opacity: 1; }
+    }
+    .thinking-dot:nth-child(1) { animation: pulse-dot 1.4s 0s infinite; }
+    .thinking-dot:nth-child(2) { animation: pulse-dot 1.4s 0.2s infinite; }
+    .thinking-dot:nth-child(3) { animation: pulse-dot 1.4s 0.4s infinite; }
+  </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+
+  <!-- Header -->
+  <header class="bg-gray-800 border-b border-gray-700 px-6 py-3">
+    <div class="max-w-7xl mx-auto flex items-center justify-between">
+      <h1 class="text-xl font-bold text-white tracking-wide">♟ ChessBot Arena</h1>
+      <div class="flex items-center gap-3">
+        <span id="status-badge" class="px-3 py-1 rounded-full text-xs font-semibold bg-gray-600">WAITING</span>
+        <span id="connection-dot" class="w-2.5 h-2.5 rounded-full bg-gray-500" title="Serial status"></span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main content -->
+  <main class="max-w-7xl mx-auto px-4 py-6">
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+      <!-- LEFT COLUMN: Board + Controls -->
+      <div class="lg:col-span-7 flex flex-col items-center gap-4">
+
+        <!-- Board wrapper with eval bar -->
+        <div class="flex gap-3 items-stretch">
+          <!-- Eval Bar -->
+          <div class="eval-bar-container hidden md:block" style="min-height: 360px;">
+            <div id="eval-bar-white" class="eval-bar-white" style="height: 50%;"></div>
+          </div>
+
+          <!-- Board -->
+          <div>
+            <!-- Rank/File labels + board -->
+            <div id="chess-board" class="grid grid-cols-8 border-2 border-gray-600" style="width: fit-content;">
+              <!-- Squares injected by JS -->
+            </div>
+            <div class="flex justify-between mt-1 px-1 text-xs text-gray-500" id="file-labels">
+              <span>a</span><span>b</span><span>c</span><span>d</span>
+              <span>e</span><span>f</span><span>g</span><span>h</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Turn indicator + thinking -->
+        <div class="flex items-center gap-2 text-sm">
+          <span id="turn-indicator" class="font-medium">White to move</span>
+          <span id="thinking-indicator" class="hidden flex items-center gap-0.5">
+            <span class="thinking-dot w-1.5 h-1.5 bg-yellow-400 rounded-full inline-block"></span>
+            <span class="thinking-dot w-1.5 h-1.5 bg-yellow-400 rounded-full inline-block"></span>
+            <span class="thinking-dot w-1.5 h-1.5 bg-yellow-400 rounded-full inline-block"></span>
+          </span>
+        </div>
+
+        <!-- Move input -->
+        <div class="flex gap-2 w-full max-w-sm">
+          <input id="move-input" type="text" maxlength="5" placeholder="e.g. e2e4"
+            class="flex-1 px-4 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white
+                   placeholder-gray-500 focus:border-blue-500 focus:outline-none font-mono text-lg tracking-wider"
+            autocomplete="off">
+          <button id="btn-submit-move" onclick="submitMove()"
+            class="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg
+                   transition disabled:opacity-50 disabled:cursor-not-allowed">
+            Send
+          </button>
+        </div>
+
+        <!-- Game control buttons -->
+        <div class="flex flex-wrap gap-2 justify-center">
+          <button onclick="startNewGame()"
+            class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition">
+            ▶ New Game
+          </button>
+          <button onclick="requestHint()"
+            class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold rounded-lg transition">
+            💡 Hint
+          </button>
+          <button onclick="resignGame()"
+            class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition">
+            🏳 Resign
+          </button>
+          <button onclick="offerDraw()"
+            class="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white text-sm font-semibold rounded-lg transition">
+            🤝 Draw
+          </button>
+        </div>
+
+        <!-- New Game Config (hidden by default) -->
+        <div id="new-game-panel" class="hidden w-full max-w-sm bg-gray-800 rounded-lg p-4 border border-gray-700">
+          <h3 class="text-sm font-bold mb-3 text-gray-300">New Game Settings</h3>
+          <div class="grid grid-cols-2 gap-3 text-sm">
+            <div>
+              <label class="text-gray-400 text-xs">Difficulty (1-10)</label>
+              <input id="cfg-difficulty" type="number" min="1" max="10" value="5"
+                class="w-full mt-1 px-3 py-1.5 bg-gray-700 border border-gray-600 rounded text-white">
+            </div>
+            <div>
+              <label class="text-gray-400 text-xs">Timer (min, 0=off)</label>
+              <input id="cfg-timer" type="number" min="0" max="60" value="10"
+                class="w-full mt-1 px-3 py-1.5 bg-gray-700 border border-gray-600 rounded text-white">
+            </div>
+            <div>
+              <label class="text-gray-400 text-xs">Increment (sec)</label>
+              <input id="cfg-increment" type="number" min="0" max="30" value="0"
+                class="w-full mt-1 px-3 py-1.5 bg-gray-700 border border-gray-600 rounded text-white">
+            </div>
+            <div>
+              <label class="text-gray-400 text-xs">Play as</label>
+              <select id="cfg-color"
+                class="w-full mt-1 px-3 py-1.5 bg-gray-700 border border-gray-600 rounded text-white">
+                <option value="white">White</option>
+                <option value="black">Black</option>
+              </select>
+            </div>
+          </div>
+          <div class="flex gap-2 mt-3">
+            <button onclick="confirmStartGame()"
+              class="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded transition">
+              Start
+            </button>
+            <button onclick="toggleNewGamePanel(false)"
+              class="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white text-sm rounded transition">
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT COLUMN: LCD + Eval + History -->
+      <div class="lg:col-span-5 flex flex-col gap-4">
+
+        <!-- LCD Simulator -->
+        <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+          <h3 class="text-xs font-bold text-gray-400 mb-2 uppercase tracking-wider">LCD Display</h3>
+          <div class="lcd-display">
+            <div id="lcd-row0" class="whitespace-pre">ChessBot Arena  </div>
+            <div id="lcd-row1" class="whitespace-pre">  Ready...      </div>
+          </div>
+        </div>
+
+        <!-- Timers -->
+        <div class="grid grid-cols-2 gap-3">
+          <div class="bg-gray-800 rounded-lg p-3 border border-gray-700 text-center">
+            <div class="text-xs text-gray-400 mb-1">⬜ White</div>
+            <div id="timer-white" class="text-2xl font-mono font-bold text-white">10:00</div>
+          </div>
+          <div class="bg-gray-800 rounded-lg p-3 border border-gray-700 text-center">
+            <div class="text-xs text-gray-400 mb-1">⬛ Black</div>
+            <div id="timer-black" class="text-2xl font-mono font-bold text-white">10:00</div>
+          </div>
+        </div>
+
+        <!-- Eval + Game Info -->
+        <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider">Evaluation</h3>
+            <span id="eval-label-badge" class="hidden px-2 py-0.5 rounded text-xs font-bold">—</span>
+          </div>
+          <div class="flex items-center gap-4">
+            <div id="eval-emoticon" class="text-2xl font-mono">—</div>
+            <div class="text-sm text-gray-400">
+              <div>Depth: <span id="info-depth" class="text-white">5</span></div>
+              <div>Game: <span id="info-game-id" class="text-white">#0</span></div>
+              <div>Color: <span id="info-player-color" class="text-white">White</span></div>
+            </div>
+          </div>
+          <!-- Hint display -->
+          <div id="hint-display" class="hidden mt-2 px-3 py-1.5 bg-purple-900/40 border border-purple-700 rounded text-sm">
+            💡 Hint: <span id="hint-move" class="font-mono font-bold text-purple-300"></span>
+          </div>
+        </div>
+
+        <!-- Move History -->
+        <div class="bg-gray-800 rounded-lg p-4 border border-gray-700 flex-1 min-h-0">
+          <h3 class="text-xs font-bold text-gray-400 mb-2 uppercase tracking-wider">Move History</h3>
+          <div class="history-scroll overflow-y-auto" style="max-height: 300px;">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="text-gray-500 text-xs">
+                  <th class="text-left w-8">#</th>
+                  <th class="text-left">White</th>
+                  <th class="text-left">Black</th>
+                </tr>
+              </thead>
+              <tbody id="history-body">
+                <tr><td colspan="3" class="text-gray-600 py-4 text-center">No moves yet</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </main>
+
+  <!-- Game End Overlay -->
+  <div id="game-end-overlay" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+    <div class="bg-gray-800 rounded-xl p-8 border border-gray-600 text-center max-w-sm mx-4">
+      <div id="end-icon" class="text-5xl mb-3">♔</div>
+      <h2 id="end-title" class="text-2xl font-bold mb-2">Game Over</h2>
+      <p id="end-message" class="text-gray-400 mb-6">—</p>
+      <div class="flex gap-3 justify-center">
+        <button onclick="startNewGame(); closeEndOverlay();"
+          class="px-6 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition">
+          New Game
+        </button>
+        <button onclick="closeEndOverlay()"
+          class="px-6 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition">
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+
+<script>
+// ================================================================
+// STATE & CONFIG
+// ================================================================
+let prevState = null;
+let gameEndShown = null; // track which game_id's end was shown
+
+const PIECE_MAP = {
+  'K': '♔', 'Q': '♕', 'R': '♖', 'B': '♗', 'N': '♘', 'P': '♙',
+  'k': '♚', 'q': '♛', 'r': '♜', 'b': '♝', 'n': '♞', 'p': '♟'
+};
+
+const EMOTICONS = {
+  'BRILLIANT': '(@_@) Brilliant!',
+  'GOOD':      '(^_^) Good!',
+  'INAC':      '(._o) Inaccuracy',
+  'MISTAKE':   '(T_T) Mistake..',
+  'BLUNDER':   '(X_X) Blunder!!!'
+};
+
+const QUALITY_COLORS = {
+  'BRILLIANT': 'badge-BRILLIANT',
+  'GOOD':      'badge-GOOD',
+  'INAC':      'badge-INAC',
+  'MISTAKE':   'badge-MISTAKE',
+  'BLUNDER':   'badge-BLUNDER'
+};
+
+// ================================================================
+// BOARD RENDERING
+// ================================================================
+function parseFEN(fen) {
+  const rows = fen.split(' ')[0].split('/');
+  const board = [];
+  for (const row of rows) {
+    const rank = [];
+    for (const ch of row) {
+      if (ch >= '1' && ch <= '8') {
+        for (let i = 0; i < parseInt(ch); i++) rank.push(null);
+      } else {
+        rank.push(ch);
+      }
+    }
+    board.push(rank);
+  }
+  return board;
+}
+
+function renderBoard(fen, lastMove) {
+  const boardEl = document.getElementById('chess-board');
+  const boardData = parseFEN(fen);
+  boardEl.innerHTML = '';
+
+  // Parse last move squares
+  let hlFrom = -1, hlTo = -1;
+  if (lastMove && lastMove.length >= 4) {
+    const fc = lastMove.charCodeAt(0) - 97;
+    const fr = 8 - parseInt(lastMove[1]);
+    const tc = lastMove.charCodeAt(2) - 97;
+    const tr = 8 - parseInt(lastMove[3]);
+    hlFrom = fr * 8 + fc;
+    hlTo = tr * 8 + tc;
+  }
+
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
+      const sq = document.createElement('div');
+      const isLight = (r + c) % 2 === 0;
+      const idx = r * 8 + c;
+      const isHighlight = (idx === hlFrom || idx === hlTo);
+
+      let cls = 'flex items-center justify-center w-10 h-10 md:w-12 md:h-12 ';
+      if (isHighlight) {
+        cls += isLight ? 'square-highlight-light' : 'square-highlight-dark';
+      } else {
+        cls += isLight ? 'square-light' : 'square-dark';
+      }
+      sq.className = cls;
+
+      const piece = boardData[r][c];
+      if (piece) {
+        const span = document.createElement('span');
+        span.className = 'piece';
+        span.textContent = PIECE_MAP[piece] || piece;
+        sq.appendChild(span);
+      }
+
+      boardEl.appendChild(sq);
+    }
+  }
+}
+
+// ================================================================
+// UI UPDATE
+// ================================================================
+function formatTime(totalSecs) {
+  const m = Math.floor(totalSecs / 60);
+  const s = totalSecs % 60;
+  return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+}
+
+function updateUI(s) {
+  // Board
+  renderBoard(s.board_fen, s.last_move);
+
+  // LCD
+  document.getElementById('lcd-row0').textContent = (s.lcd_row0 || '').padEnd(16).substring(0, 16);
+  document.getElementById('lcd-row1').textContent = (s.lcd_row1 || '').padEnd(16).substring(0, 16);
+
+  // Timers
+  document.getElementById('timer-white').textContent = formatTime(s.timer_white || 0);
+  document.getElementById('timer-black').textContent = formatTime(s.timer_black || 0);
+
+  // Timer color: active player gets brighter styling
+  const twEl = document.getElementById('timer-white');
+  const tbEl = document.getElementById('timer-black');
+  if (s.status === 'playing') {
+    twEl.className = 'text-2xl font-mono font-bold ' + (s.turn === 'white' ? 'text-white' : 'text-gray-500');
+    tbEl.className = 'text-2xl font-mono font-bold ' + (s.turn === 'black' ? 'text-white' : 'text-gray-500');
+  }
+
+  // Turn indicator
+  const turnEl = document.getElementById('turn-indicator');
+  turnEl.textContent = s.status === 'playing'
+    ? (s.turn === 'white' ? 'White to move' : 'Black to move')
+    : statusText(s.status, s.winner);
+
+  // Thinking indicator
+  document.getElementById('thinking-indicator').classList.toggle('hidden', !s.thinking);
+
+  // Status badge
+  const badge = document.getElementById('status-badge');
+  badge.textContent = s.status.toUpperCase();
+  badge.className = 'px-3 py-1 rounded-full text-xs font-semibold ' + statusBadgeColor(s.status);
+
+  // Eval
+  const evalEl = document.getElementById('eval-emoticon');
+  const evalBadge = document.getElementById('eval-label-badge');
+  if (s.eval_label) {
+    evalEl.textContent = EMOTICONS[s.eval_label] || s.eval_label;
+    evalBadge.textContent = s.eval_label;
+    evalBadge.className = 'px-2 py-0.5 rounded text-xs font-bold ' + (QUALITY_COLORS[s.eval_label] || 'bg-gray-600');
+    evalBadge.classList.remove('hidden');
+  } else {
+    evalEl.textContent = '—';
+    evalBadge.classList.add('hidden');
+  }
+
+  // Eval bar
+  const cp = s.eval_cp || 0;
+  const clampedCp = Math.max(-1000, Math.min(1000, cp));
+  const pct = 50 + (clampedCp / 1000) * 50;
+  const barEl = document.getElementById('eval-bar-white');
+  if (barEl) barEl.style.height = pct + '%';
+
+  // Game info
+  document.getElementById('info-depth').textContent = s.difficulty || 5;
+  document.getElementById('info-game-id').textContent = '#' + (s.game_id || 0);
+  document.getElementById('info-player-color').textContent = (s.player_color || 'white').charAt(0).toUpperCase() + (s.player_color || 'white').slice(1);
+
+  // Hint
+  const hintDisplay = document.getElementById('hint-display');
+  if (s.hint_move) {
+    document.getElementById('hint-move').textContent = s.hint_move.toUpperCase();
+    hintDisplay.classList.remove('hidden');
+  } else {
+    hintDisplay.classList.add('hidden');
+  }
+
+  // Move history
+  renderHistory(s.move_history || []);
+
+  // Game end overlay
+  if ((s.status === 'checkmate' || s.status === 'stalemate' || s.status === 'resigned' || s.status === 'draw')
+      && gameEndShown !== s.game_id) {
+    gameEndShown = s.game_id;
+    showEndOverlay(s);
+  }
+}
+
+function statusText(status, winner) {
+  switch (status) {
+    case 'waiting': return 'Waiting for game...';
+    case 'playing': return 'Game in progress';
+    case 'checkmate': return (winner ? winner.charAt(0).toUpperCase() + winner.slice(1) : '') + ' wins by checkmate!';
+    case 'stalemate': return 'Draw by stalemate';
+    case 'resigned': return (winner ? winner.charAt(0).toUpperCase() + winner.slice(1) : '') + ' wins by resignation';
+    case 'draw': return 'Game drawn by agreement';
+    default: return status;
+  }
+}
+
+function statusBadgeColor(status) {
+  switch (status) {
+    case 'playing': return 'bg-green-600 text-white';
+    case 'checkmate': return 'bg-red-600 text-white';
+    case 'stalemate': case 'draw': return 'bg-yellow-600 text-black';
+    case 'resigned': return 'bg-orange-600 text-white';
+    default: return 'bg-gray-600 text-white';
+  }
+}
+
+function renderHistory(moves) {
+  const body = document.getElementById('history-body');
+  if (!moves || moves.length === 0) {
+    body.innerHTML = '<tr><td colspan="3" class="text-gray-600 py-4 text-center">No moves yet</td></tr>';
+    return;
+  }
+
+  let html = '';
+  for (let i = 0; i < moves.length; i += 2) {
+    const num = Math.floor(i / 2) + 1;
+    const white = moves[i];
+    const black = (i + 1 < moves.length) ? moves[i + 1] : null;
+
+    html += '<tr class="border-b border-gray-700/50">';
+    html += `<td class="py-1 text-gray-500">${num}.</td>`;
+    html += `<td class="py-1">${moveCell(white)}</td>`;
+    html += `<td class="py-1">${black ? moveCell(black) : ''}</td>`;
+    html += '</tr>';
+  }
+  body.innerHTML = html;
+
+  // Auto-scroll to bottom
+  const container = body.closest('.history-scroll');
+  if (container) container.scrollTop = container.scrollHeight;
+}
+
+function moveCell(m) {
+  const badge = m.eval_label
+    ? `<span class="ml-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${QUALITY_COLORS[m.eval_label] || ''}">${m.eval_label}</span>`
+    : '';
+  return `<span class="font-mono">${m.move}</span>${badge}`;
+}
+
+// ================================================================
+// GAME END OVERLAY
+// ================================================================
+function showEndOverlay(s) {
+  document.getElementById('game-end-overlay').classList.remove('hidden');
+  const icon = document.getElementById('end-icon');
+  const title = document.getElementById('end-title');
+  const msg = document.getElementById('end-message');
+
+  if (s.status === 'checkmate') {
+    icon.textContent = s.winner === 'white' ? '♔' : '♚';
+    title.textContent = 'Checkmate!';
+    msg.textContent = (s.winner.charAt(0).toUpperCase() + s.winner.slice(1)) + ' wins!';
+  } else if (s.status === 'stalemate') {
+    icon.textContent = '🤝';
+    title.textContent = 'Stalemate';
+    msg.textContent = 'The game is a draw.';
+  } else if (s.status === 'resigned') {
+    icon.textContent = '🏳️';
+    title.textContent = 'Resignation';
+    msg.textContent = (s.winner.charAt(0).toUpperCase() + s.winner.slice(1)) + ' wins!';
+  } else if (s.status === 'draw') {
+    icon.textContent = '🤝';
+    title.textContent = 'Draw';
+    msg.textContent = 'Game drawn by agreement.';
+  }
+}
+
+function closeEndOverlay() {
+  document.getElementById('game-end-overlay').classList.add('hidden');
+}
+
+// ================================================================
+// API CALLS
+// ================================================================
+async function submitMove() {
+  const input = document.getElementById('move-input');
+  const move = input.value.trim().toLowerCase();
+  if (!move) return;
+
+  try {
+    const res = await fetch('/api/move', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ move })
+    });
+    const data = await res.json();
+    if (data.error) {
+      flashInput('border-red-500');
+    } else {
+      input.value = '';
+      flashInput('border-green-500');
+      pollState(); // immediate refresh
+    }
+  } catch (e) {
+    console.error('Move submit error:', e);
+  }
+}
+
+function startNewGame() {
+  toggleNewGamePanel(true);
+}
+
+async function confirmStartGame() {
+  const diff = parseInt(document.getElementById('cfg-difficulty').value) || 5;
+  const timer = parseInt(document.getElementById('cfg-timer').value) || 0;
+  const inc = parseInt(document.getElementById('cfg-increment').value) || 0;
+  const color = document.getElementById('cfg-color').value;
+
+  try {
+    await fetch('/api/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ difficulty: diff, timer: timer, increment: inc, player_color: color })
+    });
+    toggleNewGamePanel(false);
+    gameEndShown = null;
+    closeEndOverlay();
+    pollState();
+  } catch (e) {
+    console.error('Start error:', e);
+  }
+}
+
+async function requestHint() {
+  try {
+    await fetch('/api/hint', { method: 'POST' });
+    pollState();
+  } catch (e) {
+    console.error('Hint error:', e);
+  }
+}
+
+async function resignGame() {
+  if (!confirm('Are you sure you want to resign?')) return;
+  try {
+    await fetch('/api/resign', { method: 'POST' });
+    pollState();
+  } catch (e) {
+    console.error('Resign error:', e);
+  }
+}
+
+async function offerDraw() {
+  if (!confirm('Offer a draw?')) return;
+  try {
+    await fetch('/api/draw', { method: 'POST' });
+    pollState();
+  } catch (e) {
+    console.error('Draw error:', e);
+  }
+}
+
+function toggleNewGamePanel(show) {
+  document.getElementById('new-game-panel').classList.toggle('hidden', !show);
+}
+
+function flashInput(colorClass) {
+  const input = document.getElementById('move-input');
+  input.classList.add(colorClass);
+  setTimeout(() => input.classList.remove(colorClass), 600);
+}
+
+// ================================================================
+// POLLING
+// ================================================================
+async function pollState() {
+  try {
+    const res = await fetch('/api/state');
+    const s = await res.json();
+    updateUI(s);
+    prevState = s;
+  } catch (e) {
+    // Server unreachable — show disconnected state
+    document.getElementById('connection-dot').className = 'w-2.5 h-2.5 rounded-full bg-red-500';
+  }
+}
+
+// Enter key submits move
+document.getElementById('move-input').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') submitMove();
+});
+
+// ================================================================
+// INIT
+// ================================================================
+// Initial render with starting position
+renderBoard('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', null);
+
+// Start polling
+pollState();
+setInterval(pollState, 1000);
+
+</script>
+</body>
+</html>
