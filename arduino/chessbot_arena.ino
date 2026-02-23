@@ -144,7 +144,7 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 #define PIN_RED   9
 #define PIN_BLUE  10
 #define PIN_GREEN 11
-#define PIN_BUZZ  13
+#define PIN_BUZZ  A0
 
 // ============================================================
 // STATE MACHINE
@@ -350,7 +350,7 @@ void setup() {
   pinMode(PIN_GREEN, OUTPUT);
   pinMode(PIN_BUZZ, OUTPUT);
   setRGB(50, 50, 50); // Default dim white
-  randomSeed(analogRead(0));
+  randomSeed(analogRead(1));
   Serial.begin(9600);
   lcd.init();
   lcd.backlight();
@@ -361,6 +361,7 @@ void setup() {
   lcd.print("  Initializing  ");
   delay(2000);
   lcd.clear();
+  noTone(PIN_BUZZ);
 
   applyTimerSetting();
   applyIncrementSetting();
@@ -940,21 +941,21 @@ void playTone(int freq, int duration) {
 }
 
 void playKeyClick() {
-  tone(PIN_BUZZ, 1000, 10);
+  tone(PIN_BUZZ, 1000, 30);
 }
 
 void playMoveSound() {
   // Quick ascending notification: "Ding-ding"
-  tone(PIN_BUZZ, 660, 80); // E5
-  delay(80);
-  tone(PIN_BUZZ, 880, 150); // A5
+  tone(PIN_BUZZ, 660, 100); // E5
+  delay(120);
+  tone(PIN_BUZZ, 880, 200); // A5
 }
 
 void playErrorSound() {
   // Low double buzz
-  tone(PIN_BUZZ, 200, 100);
-  delay(120);
-  tone(PIN_BUZZ, 150, 250);
+  tone(PIN_BUZZ, 200, 150);
+  delay(200);
+  tone(PIN_BUZZ, 150, 300);
 }
 
 void triggerEvalEffects(String label) {
